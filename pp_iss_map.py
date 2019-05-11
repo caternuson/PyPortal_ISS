@@ -9,6 +9,7 @@ from adafruit_display_shapes.circle import Circle
 MARK_SIZE = 10           # marker radius
 MARK_COLOR = 0xFF0000    # marker color
 MARK_THICKNESS = 5       # marker thickness
+LAT_MAX = 80             # latitude (deg) of map top/bottom edge
 UPDATE_RATE = 10         # update rate in seconds
 #-------------------------------------------
 
@@ -28,10 +29,9 @@ default_bg=cwd+"/map.bmp")
 # Connect to the internet and get local time
 pyportal.get_local_time()
 
-# ISS location indicator
-#iss_location = Circle(0, 0, MARK_SIZE, outline=MARK_COLOR)
+# ISS location marker
 marker = displayio.Group(max_size=MARK_THICKNESS)
-for r in range(MARK_SIZE, MARK_SIZE - MARK_THICKNESS, -1):
+for r in range(MARK_SIZE - MARK_THICKNESS, MARK_SIZE):
     marker.append(Circle(0, 0, r, outline=MARK_COLOR))
 pyportal.splash.append(marker)
 
@@ -42,11 +42,15 @@ def get_location(width=WIDTH, height=HEIGHT):
     location = pyportal.fetch()
 
     # Compute (x, y) coordinates
-    lat = float(location["latitude"])   # degrees, 0 to 180
+    lat = float(location["latitude"])   # degrees, -90 to 90
     lon = float(location["longitude"])  # degrees, -180 to 180
+
+    # Scale latitude for cropped map
+    lat *= 90 / LAT_MAX
 
     # Mercator projection math
     # https://stackoverflow.com/a/14457180
+    # https://en.wikipedia.org/wiki/Mercator_projection#Alternative_expressions
     x = lon + 180
     x = width * x / 360
 
@@ -60,8 +64,7 @@ def get_location(width=WIDTH, height=HEIGHT):
 
 while True:
     x, y = get_location()
-    print(x, y)
-    marker.x = x - MARK_SIZE
-    marker.y = y - MARK_SIZE
+    marker.x = x
+    marker.y = y
     board.DISPLAY.refresh_soon()
     time.sleep(UPDATE_RATE)
