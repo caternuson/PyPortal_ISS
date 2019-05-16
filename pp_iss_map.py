@@ -2,13 +2,19 @@ import time
 import math
 import board
 import displayio
+from terminalio import FONT
 from adafruit_pyportal import PyPortal
 from adafruit_display_shapes.circle import Circle
+from adafruit_display_text.label import Label
 
 #--| USER CONFIG |--------------------------
 MARK_SIZE = 10           # marker radius
-MARK_COLOR = 0xFF0000    # marker color
+MARK_COLOR = 0xFF3030    # marker color
 MARK_THICKNESS = 5       # marker thickness
+TRAIL_LENGTH = 200       # trail length
+TRAIL_COLOR = 0xFFFF00   # trail color
+DATE_COLOR = 0x111122    # date color
+TIME_COLOR = 0x111111    # time color
 LAT_MAX = 80             # latitude (deg) of map top/bottom edge
 UPDATE_RATE = 10         # update rate in seconds
 #-------------------------------------------
@@ -24,10 +30,23 @@ cwd = ("/"+__file__).rsplit('/', 1)[0]
 pyportal = PyPortal(url=DATA_SOURCE,
                     json_path=DATA_LOCATION,
                     status_neopixel=board.NEOPIXEL,
-default_bg=cwd+"/map.bmp")
+                    default_bg=cwd+"/map.bmp")
 
 # Connect to the internet and get local time
 pyportal.get_local_time()
+
+# Date and time label
+date_label = Label(FONT, text="0000-00-00", color=DATE_COLOR, x=165, y=223)
+time_label = Label(FONT, text="00:00:00", color=TIME_COLOR, x=240, y=223)
+pyportal.splash.append(date_label)
+pyportal.splash.append(time_label)
+
+# ISS trail
+trail_bitmap = displayio.Bitmap(3, 3, 1)
+trail_palette = displayio.Palette(1)
+trail_palette[0] = TRAIL_COLOR
+trail = displayio.Group(max_size=TRAIL_LENGTH)
+pyportal.splash.append(trail)
 
 # ISS location marker
 marker = displayio.Group(max_size=MARK_THICKNESS)
@@ -40,6 +59,13 @@ def get_location(width=WIDTH, height=HEIGHT):
 
     # Get location
     location = pyportal.fetch()
+    # assuming PR42
+    # try:
+    #     location = pyportal.fetch()
+    # except RuntimeError:
+    #     # meh, just try again
+    #     print("barf")
+    #     return None, None
 
     # Compute (x, y) coordinates
     lat = float(location["latitude"])   # degrees, -90 to 90
@@ -62,9 +88,43 @@ def get_location(width=WIDTH, height=HEIGHT):
 
     return int(x), int(y)
 
-while True:
-    x, y = get_location()
-    marker.x = x
-    marker.y = y
+def update_display(current_time, update_iss=False):
+    """Update the display with current info."""
+
+    # ISS location
+    if update_iss:
+        x, y = get_location()
+        if x and y:
+            marker.x = x
+            marker.y = y
+            if len(trail) >= TRAIL_LENGTH:
+                trail.pop(0)
+            trail.append(displayio.TileGrid(trail_bitmap,
+                                                pixel_shader=trail_palette,
+                                                x = x - 1,
+                                                y = y - 1) )
+
+
+    # Date and time
+    date_label.text = "{:04}-{:02}-{:02}".format(current_time.tm_year,
+                                                 current_time.tm_mon,
+                                                 current_time.tm_mday)
+    time_label.text = "{:02}:{:02}:{:02}".format(current_time.tm_hour,
+                                                 current_time.tm_min,
+                                                 current_time.tm_sec)
+
     board.DISPLAY.refresh_soon()
-    time.sleep(UPDATE_RATE)
+
+# Initial refresh
+update_display(time.localtime(), True)
+last_update = time.monotonic()
+
+# Run forever
+while True:
+    current_time = time.monotonic()
+    update_iss = False
+    if current_time - last_update > UPDATE_RATE:
+        update_iss = True
+        last_update = current_time
+    update_display(time.localtime(), update_iss)
+    time.sleep(0.5)
